@@ -1,0 +1,178 @@
+From 272b94acd340209550ff2ddd2f9446b0ce557fb7 Mon Sep 17 00:00:00 2001
+From: Joletta Cheung <ajoletta@amazon.com>
+Date: Thu, 27 Jul 2023 17:53:02 -0700
+Subject: [PATCH] Added the ability to transmit and display device name in the
+ Matter SDK
+
+---
+ examples/all-clusters-app/linux/main-common.cpp    |  1 +
+ src/include/platform/DeviceInstanceInfoProvider.h  | 13 +++++++++++++
+ .../internal/GenericConfigurationManagerImpl.ipp   |  4 +---
+ .../internal/GenericDeviceInstanceInfoProvider.h   |  1 +
+ .../internal/GenericDeviceInstanceInfoProvider.ipp |  9 +++++++++
+ src/platform/android/AndroidConfig.cpp             |  1 +
+ src/platform/android/AndroidConfig.h               |  1 +
+ .../android/DeviceInstanceInfoProviderImpl.cpp     | 14 ++++++++++++++
+ .../android/DeviceInstanceInfoProviderImpl.h       |  1 +
+ .../java/chip/platform/ConfigurationManager.java   |  1 +
+ 10 files changed, 43 insertions(+), 3 deletions(-)
+
+diff --git a/examples/all-clusters-app/linux/main-common.cpp b/examples/all-clusters-app/linux/main-common.cpp
+index 727bddb955..3b075a004e 100644
+--- a/examples/all-clusters-app/linux/main-common.cpp
++++ b/examples/all-clusters-app/linux/main-common.cpp
+@@ -113,6 +113,7 @@ class ExampleDeviceInstanceInfoProvider : public DeviceInstanceInfoProvider
+ public:
+     void Init(DeviceInstanceInfoProvider * defaultProvider) { mDefaultProvider = defaultProvider; }
+ 
++    CHIP_ERROR GetDeviceName(char * buf, size_t bufSize) override { return mDefaultProvider->GetDeviceName(buf, bufSize); }
+     CHIP_ERROR GetVendorName(char * buf, size_t bufSize) override { return mDefaultProvider->GetVendorName(buf, bufSize); }
+     CHIP_ERROR GetVendorId(uint16_t & vendorId) override { return mDefaultProvider->GetVendorId(vendorId); }
+     CHIP_ERROR GetProductName(char * buf, size_t bufSize) override { return mDefaultProvider->GetProductName(buf, bufSize); }
+diff --git a/src/include/platform/DeviceInstanceInfoProvider.h b/src/include/platform/DeviceInstanceInfoProvider.h
+index c072df6b55..66f8599de1 100644
+--- a/src/include/platform/DeviceInstanceInfoProvider.h
++++ b/src/include/platform/DeviceInstanceInfoProvider.h
+@@ -29,6 +29,19 @@ public:
+     DeviceInstanceInfoProvider()          = default;
+     virtual ~DeviceInstanceInfoProvider() = default;
+ 
++    /**
++     * @brief Obtain the Device Name from the device's factory data.
++     *
++     * @param[out] buf Buffer to copy string.
++     *                 On CHIP_NO_ERROR return from this function this buffer will be null-terminated.
++     *                 On error CHIP_ERROR_BUFFER_TOO_SMALL there is no guarantee that buffer will be null-terminated.
++     * @param[in] bufSize Size of data, including the null terminator, that can be written to buf.
++     *                    This size should be +1 higher than maximum possible string.
++     * @returns CHIP_NO_ERROR on success, or another CHIP_ERROR from the underlying implementation
++     *          if access fails.
++     */
++    virtual CHIP_ERROR GetDeviceName(char * buf, size_t bufSize) = 0;
++
+     /**
+      * @brief Obtain the Vendor Name from the device's factory data.
+      *
+diff --git a/src/include/platform/internal/GenericConfigurationManagerImpl.ipp b/src/include/platform/internal/GenericConfigurationManagerImpl.ipp
+index ca7d27ae47..ff8bc3947a 100644
+--- a/src/include/platform/internal/GenericConfigurationManagerImpl.ipp
++++ b/src/include/platform/internal/GenericConfigurationManagerImpl.ipp
+@@ -635,9 +635,7 @@ bool GenericConfigurationManagerImpl<ConfigClass>::IsCommissionableDeviceNameEna
+ template <class ConfigClass>
+ CHIP_ERROR GenericConfigurationManagerImpl<ConfigClass>::GetCommissionableDeviceName(char * buf, size_t bufSize)
+ {
+-    ReturnErrorCodeIf(bufSize < sizeof(CHIP_DEVICE_CONFIG_DEVICE_NAME), CHIP_ERROR_BUFFER_TOO_SMALL);
+-    strcpy(buf, CHIP_DEVICE_CONFIG_DEVICE_NAME);
+-    return CHIP_NO_ERROR;
++    return GetDeviceInstanceInfoProvider()->GetDeviceName(buf, bufSize);
+ }
+ 
+ template <class ConfigClass>
+diff --git a/src/include/platform/internal/GenericDeviceInstanceInfoProvider.h b/src/include/platform/internal/GenericDeviceInstanceInfoProvider.h
+index 831b49a003..3ba655d2d1 100644
+--- a/src/include/platform/internal/GenericDeviceInstanceInfoProvider.h
++++ b/src/include/platform/internal/GenericDeviceInstanceInfoProvider.h
+@@ -41,6 +41,7 @@ public:
+         mGenericConfigManager(configManager)
+     {}
+ 
++    CHIP_ERROR GetDeviceName(char * buf, size_t bufSize) override;
+     CHIP_ERROR GetVendorName(char * buf, size_t bufSize) override;
+     CHIP_ERROR GetVendorId(uint16_t & vendorId) override;
+     CHIP_ERROR GetProductName(char * buf, size_t bufSize) override;
+diff --git a/src/include/platform/internal/GenericDeviceInstanceInfoProvider.ipp b/src/include/platform/internal/GenericDeviceInstanceInfoProvider.ipp
+index 549c3eb360..4cb1672c89 100644
+--- a/src/include/platform/internal/GenericDeviceInstanceInfoProvider.ipp
++++ b/src/include/platform/internal/GenericDeviceInstanceInfoProvider.ipp
+@@ -21,6 +21,15 @@ namespace chip {
+ namespace DeviceLayer {
+ namespace Internal {
+ 
++template <class ConfigClass>
++CHIP_ERROR GenericDeviceInstanceInfoProvider<ConfigClass>::GetDeviceName(char * buf, size_t bufSize)
++{
++    ReturnErrorCodeIf(bufSize < sizeof(CHIP_DEVICE_CONFIG_DEVICE_NAME), CHIP_ERROR_BUFFER_TOO_SMALL);
++    strcpy(buf, CHIP_DEVICE_CONFIG_DEVICE_NAME);
++
++    return CHIP_NO_ERROR;
++}
++
+ template <class ConfigClass>
+ CHIP_ERROR GenericDeviceInstanceInfoProvider<ConfigClass>::GetVendorId(uint16_t & vendorId)
+ {
+diff --git a/src/platform/android/AndroidConfig.cpp b/src/platform/android/AndroidConfig.cpp
+index b2e3357159..5b3dafa378 100644
+--- a/src/platform/android/AndroidConfig.cpp
++++ b/src/platform/android/AndroidConfig.cpp
+@@ -60,6 +60,7 @@ const char AndroidConfig::kConfigNamespace_ChipCounters[] = "chip-counters";
+ 
+ // Keys stored in the Chip-factory namespace
+ const AndroidConfig::Key AndroidConfig::kConfigKey_SerialNum             = { kConfigNamespace_ChipFactory, "serial-num" };
++const AndroidConfig::Key AndroidConfig::kConfigKey_MfrDeviceName         = { kConfigNamespace_ChipFactory, "device-name" };
+ const AndroidConfig::Key AndroidConfig::kConfigKey_MfrDeviceId           = { kConfigNamespace_ChipFactory, "device-id" };
+ const AndroidConfig::Key AndroidConfig::kConfigKey_MfrDeviceCert         = { kConfigNamespace_ChipFactory, "device-cert" };
+ const AndroidConfig::Key AndroidConfig::kConfigKey_MfrDeviceICACerts     = { kConfigNamespace_ChipFactory, "device-ca-certs" };
+diff --git a/src/platform/android/AndroidConfig.h b/src/platform/android/AndroidConfig.h
+index d6f446d0fc..81bc492e62 100644
+--- a/src/platform/android/AndroidConfig.h
++++ b/src/platform/android/AndroidConfig.h
+@@ -54,6 +54,7 @@ public:
+ 
+     // Key definitions for well-known keys.
+     static const Key kConfigKey_SerialNum;
++    static const Key kConfigKey_MfrDeviceName;
+     static const Key kConfigKey_MfrDeviceId;
+     static const Key kConfigKey_MfrDeviceCert;
+     static const Key kConfigKey_MfrDeviceICACerts;
+diff --git a/src/platform/android/DeviceInstanceInfoProviderImpl.cpp b/src/platform/android/DeviceInstanceInfoProviderImpl.cpp
+index cd07215c37..48ced6294b 100644
+--- a/src/platform/android/DeviceInstanceInfoProviderImpl.cpp
++++ b/src/platform/android/DeviceInstanceInfoProviderImpl.cpp
+@@ -73,6 +73,20 @@ CHIP_ERROR DeviceInstanceInfoProviderImpl::GetProductLabel(char * buf, size_t bu
+     return Internal::AndroidConfig::ReadConfigValueStr(Internal::AndroidConfig::kConfigKey_ProductLabel, buf, bufSize, dateLen);
+ }
+ 
++CHIP_ERROR DeviceInstanceInfoProviderImpl::GetDeviceName(char * buf, size_t bufSize)
++{
++    CHIP_ERROR err;
++    size_t deviceNameSize = 0; // without counting null-terminator
++    err = Internal::AndroidConfig::ReadConfigValueStr(Internal::AndroidConfig::kConfigKey_MfrDeviceName, buf, bufSize,
++                                                      deviceNameSize);
++    if (err == CHIP_DEVICE_ERROR_CONFIG_NOT_FOUND)
++    {
++        ReturnErrorCodeIf(bufSize < sizeof(CHIP_DEVICE_CONFIG_DEVICE_NAME), CHIP_ERROR_BUFFER_TOO_SMALL);
++        strcpy(buf, CHIP_DEVICE_CONFIG_DEVICE_NAME);
++    }
++    return CHIP_NO_ERROR;
++}
++
+ CHIP_ERROR DeviceInstanceInfoProviderImpl::GetProductName(char * buf, size_t bufSize)
+ {
+     CHIP_ERROR err;
+diff --git a/src/platform/android/DeviceInstanceInfoProviderImpl.h b/src/platform/android/DeviceInstanceInfoProviderImpl.h
+index 489861d502..1fd5592809 100644
+--- a/src/platform/android/DeviceInstanceInfoProviderImpl.h
++++ b/src/platform/android/DeviceInstanceInfoProviderImpl.h
+@@ -27,6 +27,7 @@ namespace DeviceLayer {
+ class DeviceInstanceInfoProviderImpl : public Internal::GenericDeviceInstanceInfoProvider<Internal::AndroidConfig>
+ {
+ public:
++    CHIP_ERROR GetDeviceName(char * buf, size_t bufSize) override;
+     CHIP_ERROR GetProductName(char * buf, size_t bufSize) override;
+     CHIP_ERROR GetProductId(uint16_t & productId) override;
+     CHIP_ERROR GetPartNumber(char * buf, size_t bufSize) override;
+diff --git a/src/platform/android/java/chip/platform/ConfigurationManager.java b/src/platform/android/java/chip/platform/ConfigurationManager.java
+index b05b061e75..dcc4aeb589 100644
+--- a/src/platform/android/java/chip/platform/ConfigurationManager.java
++++ b/src/platform/android/java/chip/platform/ConfigurationManager.java
+@@ -26,6 +26,7 @@ public interface ConfigurationManager {
+ 
+   // Keys stored in the Chip-factory namespace
+   String kConfigKey_SerialNum = "serial-num";
++  String kConfigKey_MfrDeviceName = "device-name";
+   String kConfigKey_MfrDeviceId = "device-id";
+   String kConfigKey_MfrDeviceCert = "device-cert";
+   String kConfigKey_MfrDeviceICACerts = "device-ca-certs";
+-- 
+2.39.2 (Apple Git-143)
+
